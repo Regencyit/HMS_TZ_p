@@ -1,0 +1,198 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "naming_series:",
+ "creation": "2021-12-08 15:01:45.847448",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "patient",
+  "patient_name",
+  "appointment_no",
+  "column_break_4",
+  "company",
+  "posting_date",
+  "posting_time",
+  "section_break_eivze",
+  "is_cash_inpatient",
+  "is_non_nhif_patient",
+  "previous_cash_limit",
+  "current_total_deposit",
+  "column_break_ow3sm",
+  "inpatient_record",
+  "insurance_company",
+  "cash_limit",
+  "section_break_fbdtz",
+  "requested_by",
+  "naming_series",
+  "column_break_edzow",
+  "approved_by",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "bold": 1,
+   "fieldname": "patient",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Patient",
+   "options": "Patient",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "patient.patient_name",
+   "fieldname": "patient_name",
+   "fieldtype": "Data",
+   "label": "Patient Name",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "bold": 1,
+   "depends_on": "eval:doc.appointment_no != \"\"",
+   "fieldname": "appointment_no",
+   "fieldtype": "Data",
+   "label": "AppointmentNo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "bold": 1,
+   "depends_on": "eval:doc.inpatient_record != \"\"",
+   "fieldname": "inpatient_record",
+   "fieldtype": "Data",
+   "label": "Inpatient Record",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Limit Change Request",
+   "print_hide": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "cash_limit",
+   "fieldtype": "Float",
+   "label": "Cash/Daily Limit"
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Series",
+   "options": "HLC-LCR-.YYYY.-",
+   "read_only": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Posting Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "posting_time",
+   "fieldtype": "Time",
+   "label": "Posting Time",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_eivze",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_cash_inpatient",
+   "fieldtype": "Check",
+   "label": "Is Cash In-Patient"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_non_nhif_patient",
+   "fieldtype": "Check",
+   "label": "Is Non-NHIF Patient"
+  },
+  {
+   "fieldname": "column_break_ow3sm",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "insurance_company",
+   "fieldtype": "Data",
+   "label": "Insurance Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_fbdtz",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Data",
+   "label": "Requested By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_edzow",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Data",
+   "label": "Approved By",
+   "read_only": 1
+  },
+  {
+   "fieldname": "previous_cash_limit",
+   "fieldtype": "Float",
+   "label": "Previous Cash/Daily Limit",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_total_deposit",
+   "fieldtype": "Float",
+   "label": "Current Total Deposited Amount",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2023-05-29 19:37:17.421675",
+ "modified_by": "Administrator",
+ "module": "Hms Tz",
+ "name": "Limit Change Request",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
