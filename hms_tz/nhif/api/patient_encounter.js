@@ -16,21 +16,7 @@ frappe.ui.form.on('Patient Encounter', {
         add_btn_final(frm);
         // duplicate(frm);
         set_btn_properties(frm);
-        if (frm.doc.docstatus == 1) {
-            frm.add_custom_button(__('Create Pending Healthcare Services'), function () {
-                frappe.call({
-                    method: 'hms_tz.nhif.api.patient_encounter.create_healthcare_docs_from_name',
-                    args: {
-                        'patient_encounter_doc_name': frm.doc.name
-                    },
-                    callback: (function (data) {
-                        //
-                    })
-                });
-            });
-        };
         set_empty_row_on_all_child_tables(frm);
-
         validate_healthcare_package_order_items(frm);
     },
     refresh: function (frm) {
@@ -57,7 +43,6 @@ frappe.ui.form.on('Patient Encounter', {
         if (frm.doc.duplicated == 1 && frm.doc.inpatient_record) {
             frm.remove_custom_button("Schedule Discharge");
         }
-        add_btn_final(frm);
         duplicate(frm);
         if (frm.doc.source == "External Referral") {
             frm.set_df_property('referring_practitioner', 'hidden', 1);
@@ -84,15 +69,22 @@ frappe.ui.form.on('Patient Encounter', {
                 }
             };
         });
-        frm.set_query('drug_code', 'drug_prescription', function () {
-            return {
-              query: "hms_tz.nhif.api.patient_encounter.get_filterd_drug",
-              filters: {
-                price_list: frm.doc.price_list,
-                disabled: 0,
-              },
-            };
-        });
+        
+        // filter medication based on company
+        filter_drug_prescriptions(frm);
+
+        // Mosaic: https://worklog.aakvatech.com/Mosaic/Task/96b2f5e26c
+        //filter dosage based on dosage form and has restricted qty ticked
+        //frm.set_query("dosage", "drug_prescription", function (doc, cdt, cdn) {
+        //    const child = locals[cdt][cdn];
+        //    return {
+        //        query: "hms_tz.nhif.api.patient_encounter.get_filtered_dosage",
+        //        filters: {
+        //            dosage_form: child.dosage_form
+        //        }
+        //   }
+        //});
+
         frm.set_query('therapy_type', 'therapies', function () {
             return {
                 filters: {
@@ -145,6 +137,8 @@ frappe.ui.form.on('Patient Encounter', {
             args: {
                 'patient': frm.doc.patient,
             },
+            freeze: true,
+            freeze_message: __('<i class="fa fa-spinner fa-spin fa-4x"></i>'),
             callback: function (data) {
                 if (data.message) {
                     if (data.message.length == 0) {
@@ -184,7 +178,9 @@ frappe.ui.form.on('Patient Encounter', {
         if (frm.doc.docstatus == 0) {
             frappe.call('hms_tz.nhif.api.patient_encounter.add_chronic_diagnosis', {
                 patient: frm.doc.patient,
-                encounter: frm.doc.name
+                encounter: frm.doc.name,
+                freeze: true,
+                freeze_message: __('<i class="fa fa-spinner fa-spin fa-4x"></i>'),
             }).then(r => {
                 // console.log(r.message);
             });
@@ -200,6 +196,8 @@ frappe.ui.form.on('Patient Encounter', {
             args: {
                 'patient': frm.doc.patient,
             },
+            freeze: true,
+            freeze_message: __('<i class="fa fa-spinner fa-spin fa-4x"></i>'),
             callback: function (data) {
                 if (data.message) {
                     if (data.message.length == 0) {
@@ -253,10 +251,13 @@ frappe.ui.form.on('Patient Encounter', {
     },
     add_chronic_medications: (frm) => {
         if (frm.doc.docstatus == 0) {
+            let items =  frm.get_field('drug_prescription').grid.get_selected_children();
             frappe.call('hms_tz.nhif.api.patient_encounter.add_chronic_medications', {
                 patient: frm.doc.patient,
                 encounter: frm.doc.name,
-                items: frm.get_field('drug_prescription').grid.get_selected_children()
+                items: items,
+                freeze: true,
+                freeze_message: __('<i class="fa fa-spinner fa-spin fa-4x"></i>'),
             }).then(r => {
                 // console.log(r.message);
             })
@@ -383,7 +384,6 @@ frappe.ui.form.on('Patient Encounter', {
                     doctype: "Lab Bundle"
                 },
                 callback(r) {
-                    console.log(r);
                     if (r.message) {
                         for (var row in r.message.lab_bundle_item) {
                             var child = frm.add_child("lab_test_prescription");
@@ -426,9 +426,9 @@ frappe.ui.form.on('Patient Encounter', {
         reuse_lrpmt_items(frm, "Procedure Prescription", fields, value_dict, "Procedure Items");
     },
     hms_tz_reuse_drug_items: (frm) => {
-        let fields = ["drug_code as item", "drug_name as item_name", "creation as date"];
-        let value_dict = { "table_field": "drug_prescription", "item_field": "drug_code", "item_name_field": "drug_name" };
-        reuse_lrpmt_items(frm, "Drug Prescription", fields, value_dict, "Drug Items");
+        let fields = ["drug_code as item", "drug_name as item_name", "medical_code", "dosage", "period", "quantity", "quantity_returned", "creation as date"]
+        let value_dict = { "table_field": "drug_prescription", "item_field": "drug_code", "item_name_field": "drug_name" }
+        reuse_lrpmt_items(frm, "Drug Prescription", fields, value_dict, "Drug Items", "Medication")
     },
     hms_tz_reuse_therapy_items: (frm) => {
         let fields = ["therapy_type as item", "therapy_type as item_name", "creation as date"];
@@ -503,12 +503,16 @@ function show_cost_estimate_model(frm, cost_estimate) {
         for (let item of cost_estimate.details[item_type]) {
             cost_estimate_html += '<tr>';
             cost_estimate_html += '<td>' + item.item + '</td>';
-            cost_estimate_html += '<td>' + item.amount + '</td>';
+            cost_estimate_html += '<td>' +
+                item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                + '</td>';
             cost_estimate_html += '</tr>';
         }
     }
     cost_estimate_html += '<tr>';
-    cost_estimate_html += '<td colspan="2" class="text-center"><strong>Total Cost: ' + cost_estimate.total_cost + '</strong></td>';
+    cost_estimate_html += '<td colspan="2" class="text-center"><strong>Total Cost: ' +
+        cost_estimate.total_cost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        + '</strong></td>';
     cost_estimate_html += '</tr>';
     cost_estimate_html += '</tbody>';
     cost_estimate_html += '</table>';
@@ -615,18 +619,25 @@ function validate_medical_code(frm) {
 
 var add_btn_final = function (frm) {
     if (frm.doc.docstatus == 1 && frm.doc.encounter_type != 'Final' && frm.doc.duplicated == 0) {
-        frm.add_custom_button(__('Set as Final'), function () {
-            frappe.call({
-                method: 'hms_tz.nhif.api.patient_encounter.finalized_encounter',
-                args: {
-                    'ref_encounter': frm.doc.reference_encounter,
-                    'cur_encounter': frm.doc.name
-                },
-                callback: (function (data) {
-                    frm.reload_doc();
-                })
-            });
-        });
+        if (!frm.page.fields_dict.set_as_final) {
+            frm.page.add_field({
+                fieldname: "set_as_final",
+                label: __("Set as Final"),
+                fieldtype: "Button",
+                click: function () {
+                    frappe.call({
+                        method: 'hms_tz.nhif.api.patient_encounter.finalized_encounter',
+                        args: {
+                            'ref_encounter': frm.doc.reference_encounter,
+                            'cur_encounter': frm.doc.name
+                        },
+                        callback: (function (data) {
+                            frm.reload_doc();
+                        })
+                    });
+                }
+            }).$input.addClass("btn-sm font-weight-bold");
+        }
     }
 };
 
@@ -805,33 +816,46 @@ frappe.ui.form.on('Drug Prescription', {
     },
     prescribe: function (frm, cdt, cdn) {
         let row = frappe.get_doc(cdt, cdn);
-        frappe.db.get_value("Company", frm.doc.company,
-            ["auto_set_pharmacy_on_patient_encounter", "opd_cash_pharmacy",
-                "opd_insurance_pharmacy", "ipd_cash_pharmacy", "ipd_insurance_pharmacy"]
-        )
-            .then(r => {
-                let values = r.message;
-                if (row.prescribe && frm.doc.insurance_subscription) {
-                    if (values.auto_set_pharmacy_on_patient_encounter == 1) {
+        if (row.prescribe == 1) {
+            frappe.db.get_value("Company", frm.doc.company,
+                ["auto_set_pharmacy_on_patient_encounter", "opd_cash_pharmacy", "ipd_cash_pharmacy"]
+            )
+                .then(r => {
+                    let values = r.message;
+                    if (values && values.auto_set_pharmacy_on_patient_encounter == 1) {
                         if (frm.doc.inpatient_record) {
                             frappe.model.set_value(cdt, cdn, "healthcare_service_unit", values.ipd_cash_pharmacy);
                         } else {
                             frappe.model.set_value(cdt, cdn, "healthcare_service_unit", values.opd_cash_pharmacy);
                         }
                     }
-                } else if (!row.prescribe && frm.doc.insurance_subscription) {
-                    if (values.auto_set_pharmacy_on_patient_encounter == 1) {
-                        if (frm.doc.inpatient_record) {
-                            frappe.model.set_value(cdt, cdn, "healthcare_service_unit", values.ipd_insurance_pharmacy);
-                        } else {
-                            frappe.model.set_value(cdt, cdn, "healthcare_service_unit", values.opd_insurance_pharmacy);
+
+                    frm.refresh_field("drug_prescription");
+                });
+        } else {
+            if (row.prescribe == 0 && frm.doc.insurance_coverage_plan) {
+                frappe.db.get_value("Healthcare Insurance Coverage Plan", frm.doc.insurance_coverage_plan,
+                    ["auto_set_pharmacy_on_patient_encounter", "opd_insurance_pharmacy", "ipd_insurance_pharmacy"]
+                )
+                    .then(r => {
+                        let values = r.message;
+                        if (values && values.auto_set_pharmacy_on_patient_encounter == 1) {
+                            if (frm.doc.inpatient_record) {
+                                if (row.healthcare_service_unit != values.ipd_insurance_pharmacy) {
+                                    frappe.model.set_value(cdt, cdn, "healthcare_service_unit", values.ipd_insurance_pharmacy);
+                                }
+                            } else {
+                                if (row.healthcare_service_unit != values.opd_insurance_pharmacy) {
+                                    frappe.model.set_value(cdt, cdn, "healthcare_service_unit", values.opd_insurance_pharmacy);
+                                }
+                            }
+                            frm.refresh_field("drug_prescription");
                         }
-                    }
-                }
-                frm.refresh_field("drug_prescription");
-            });
-        if (row.prescribe || !row.drug_code) {
-            frappe.model.set_value(cdt, cdn, "override_subscription", 0);
+                    });
+            }
+            if (row.prescribe || !row.drug_code) {
+                frappe.model.set_value(cdt, cdn, "override_subscription", 0);
+            }
         }
     },
     quantity: function (frm, cdt, cdn) {
@@ -843,10 +867,6 @@ frappe.ui.form.on('Drug Prescription', {
             frappe.model.set_value(cdt, cdn, "prescribe", 0);
             validate_stock_item(frm, row.drug_code, row.prescribe, row.quantity, row.healthcare_service_unit, "Drug Prescription");
         }
-    },
-    dosage: function (frm, cdt, cdn) {
-        frappe.model.set_value(cdt, cdn, "quantity", 0);
-        frm.refresh_field("drug_prescription");
     },
     dosage: (frm, cdt, cdn) => {
         let row = locals[cdt][cdn];
@@ -987,7 +1007,7 @@ var set_btn_properties = (frm) => {
 };
 
 var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller = "") => {
-    let filters = { "patient": frm.doc.patient, "appoitnemnt": frm.doc.appointment, "doctype": doctype, "fields": fields };
+    let filters = { "patient": frm.doc.patient, "appointment": frm.doc.appointment, "doctype": doctype, "fields": fields };
     let d = new frappe.ui.Dialog({
         title: "Select Item",
         fields: [
@@ -1068,6 +1088,15 @@ var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller
                     description: $(this).find("#description").attr("data-description"),
                     mtuha: $(this).find("#mtuha").attr("data-mtuha"),
                 });
+            } else  if (caller == "Medication") {
+                items.push({
+                    item: $(this).find("#item").attr("data-item"),
+                    item_name: $(this).find("#item_name").attr("data-item_name"),
+                    medical_code: $(this).find("#medical_code").attr("data-medical_code"),
+                    dosage: $(this).find("#dosage").attr("data-dosage"),
+                    period: $(this).find("#period").attr("data-period"),
+                    quantity: $(this).find("#quantity").attr("data-quantity"),
+                });
             } else {
                 items.push({
                     item: $(this).find("#item").attr("data-item"),
@@ -1089,12 +1118,42 @@ var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller
                 });
                 set_medical_code(frm, true);
             } else {
-                items.forEach((item) => {
-                    let new_row = {};
-                    new_row[value_dict.item_field] = item.item;
-                    new_row[value_dict.item_name_field] = item.item_name;
-                    let row = frm.add_child(field, new_row);
-                });
+                if (doctype == "Drug Prescription") {
+                    items.forEach((item) => {
+                        if (item.medical_code) { 
+                            let diagnosis_codes = frm.doc.patient_encounter_final_diagnosis.map(d => d.medical_code);
+                            let medical_code = item.medical_code.split("\n");
+                            if (!diagnosis_codes.includes(medical_code[0])) {
+                                let new_row = {}
+                                new_row.medical_code = medical_code[0];
+                                new_row.code = medical_code[0].split(" ")[1];
+                                new_row.description = medical_code[1];
+                                let row = frm.add_child("patient_encounter_final_diagnosis", new_row);
+                            }
+                            set_medical_code(frm, true);
+                            frm.refresh_field("patient_encounter_final_diagnosis");
+                        }
+                        if (item.item) {
+                            let new_row = {}
+                            new_row[value_dict.item_field] = item.item;
+                            new_row[value_dict.item_name_field] = item.item_name;
+                            new_row.medical_code = item.medical_code;
+                            new_row.dosage = item.dosage;
+                            new_row.period = item.period;
+                            new_row.quantity = item.quantity;
+                            let row = frm.add_child(field, new_row);
+                        }
+                    })
+                    frm.trigger("default_healthcare_service_unit");
+                }
+                else {
+                    items.forEach((item) => {
+                        let new_row = {}
+                        new_row[value_dict.item_field] = item.item;
+                        new_row[value_dict.item_name_field] = item.item_name;
+                        let row = frm.add_child(field, new_row);
+                    })
+                }
             }
             frm.refresh_field(field);
             d.hide();
@@ -1112,6 +1171,11 @@ var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller
     });
 
     d.$body.find("button[data-fieldtype='Button']").removeClass("btn-default").addClass("btn-info");
+    d.$body.on('change', '#th', function() {
+        var isChecked = $(this).prop('checked');
+        wrapper.find('input[type="checkbox"]').prop('checked', isChecked);
+    });
+
     d.$wrapper.find('.modal-content').css({
         "width": "650px",
         "max-height": "1000px",
@@ -1128,7 +1192,7 @@ var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller
                 caller: caller
             },
             freeze: true,
-            freeze_message: __("Please wait...")
+			freeze_message: __('<i class="fa fa-spinner fa-spin fa-4x"></i>'),
         }).then(r => {
             let records = r.message;
             if (records.length > 0) {
@@ -1160,13 +1224,13 @@ var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller
                 <col width="22%">
                 <col width="20%">
             </colgroup>
-            <tr style="background-color: #D3D3D3;">
-                <th></th>
-                <th>Medical Code</th>
-                <th>Code Name</th>
-                <th>Description</th>
-                <th>Mtuha</th>
-                <th>Date of Service</th>
+            <tr>
+                <th><input type="checkbox" id="th" class="check-all" style="border: 2px solid black;"/></th>
+                <th style="background-color: #D3D3D3;">Medical Code</th>
+                <th style="background-color: #D3D3D3;">Code Name</th>
+                <th style="background-color: #D3D3D3;">Description</th>
+                <th style="background-color: #D3D3D3;">Mtuha</th>
+                <th style="background-color: #D3D3D3;">Date of Service</th>
             </tr>`;
 
             data.forEach(row => {
@@ -1179,6 +1243,42 @@ var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller
                         <td id="date" data-date="${frappe.datetime.get_datetime_as_string(row.date)}">${frappe.datetime.get_datetime_as_string(row.date)}</td>
                     </tr>`;
             });
+        } else if (caller == "Medication") {
+            html += `
+            <colgroup>
+                <col width="5%">
+                <col width=20%">
+                <col width="1%">
+                <col width="30%">
+                <col width="10%">
+                <col width=10%">
+                <col width="5%">
+                <col width="19%">
+            </colgroup>
+            <tr>
+                <th><input type="checkbox" id="th" class="check-all" style="border: 2px solid black;" /></th>
+                <th style="background-color: #D3D3D3;">Item</th>
+                <th style="background-color: #D3D3D3;"></th>
+                <th style="background-color: #D3D3D3;">Medical Code</th>
+                <th style="background-color: #D3D3D3;">Dosage</th>
+                <th style="background-color: #D3D3D3;">Period</th>
+                <th style="background-color: #D3D3D3;">Qty</th>
+                <th style="background-color: #D3D3D3;">ServiceDate</th>
+            </tr>`;
+
+            data.forEach(row => {
+                let quantity = row.quantity - row.quantity_returned;
+                html += `<tr>
+                        <td><input type="checkbox"/></td>
+                        <td id="item" data-item="${row.item}">${row.item}</td>
+                        <td id="item_name" data-item_name="${row.item_name}"></td>
+                        <td id="medical_code" data-medical_code="${row.medical_code}">${row.medical_code}</td>
+                        <td id="dosage" data-dosage="${row.dosage}">${row.dosage}</td>
+                        <td id="period" data-period="${row.period}">${row.period}</td>
+                        <td id="quantity" data-quantity="${quantity}">${quantity}</td>
+                        <td id="date" data-date="${frappe.datetime.get_datetime_as_string(row.date)}">${frappe.datetime.get_datetime_as_string(row.date)}</td>
+                    </tr>`;
+            });
         } else {
             html += `
             <colgroup>
@@ -1187,11 +1287,11 @@ var reuse_lrpmt_items = (frm, doctype, fields, value_dict, item_category, caller
                 <col width="35%">
                 <col width="30%">
             </colgroup>
-            <tr style="background-color: #D3D3D3;">
-                <th></th>
-                <th>Item</th>
-                <th>Item Name</th>
-                <th>Date of Service</th>
+            <tr>
+                <th><input type="checkbox" id="th" class="check-all" style="border: 2px solid black;" /></th>
+                <th style="background-color: #D3D3D3;">Item</th>
+                <th style="background-color: #D3D3D3;">Item Name</th>
+                <th style="background-color: #D3D3D3;">Date of Service</th>
             </tr>`;
 
             data.forEach(row => {
@@ -1318,4 +1418,29 @@ var validate_healthcare_package_order_items = (frm) => {
             frm.set_df_property(field, "read_only", 1);
         }
     }
+}
+
+var filter_drug_prescriptions = (frm) => {
+    frappe.db.get_value("Company", frm.doc.company, "allow_filtered_medication_on_patient_encounter")
+        .then(r => {
+            if (r.message.allow_filtered_medication_on_patient_encounter == 1) {
+                frm.set_query('drug_code', 'drug_prescription', function () {
+                    return {
+                        query: "hms_tz.nhif.api.patient_encounter.get_filterd_drug",
+                        filters: {
+                            price_list: frm.doc.price_list,
+                            disabled: 0,
+                        },
+                    };
+                });
+            } else {
+                frm.set_query('drug_code', 'drug_prescription', function () {
+                    return {
+                        filters: {
+                            disabled: 0
+                        }
+                    };
+                });
+            }
+        });
 }

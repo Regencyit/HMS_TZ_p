@@ -9,7 +9,8 @@ from hms_tz.nhif.api.healthcare_utils import (
     create_delivery_note_from_LRPT,
     get_restricted_LRPT,
 )
-from frappe.utils import getdate
+from frappe.utils import getdate, get_fullname
+from frappe.core.doctype.sms_settings.sms_settings import send_sms
 import dateutil
 from frappe.query_builder import DocType
 
@@ -25,14 +26,14 @@ def set_normals(doc):
     dob = frappe.get_cached_value("Patient", doc.patient, "dob")
     age = dateutil.relativedelta.relativedelta(getdate(), dob).years
     for row in doc.normal_test_items:
-        if not row.result_value:
-            continue
         normals = get_normals(row.lab_test_name, age, doc.patient_sex)
         if normals:
             row.min_normal = normals.get("min")
             row.max_normal = normals.get("max")
             row.text_normal = normals.get("text")
 
+            if not row.result_value:
+                continue
             data_normals = calc_data_normals(normals, row.result_value)
             row.detailed_normal_range = data_normals["detailed_normal_range"]
             row.result_status = data_normals["result_status"]
@@ -102,10 +103,10 @@ def get_normals(lab_test_name, patient_age, patient_sex):
 
 def get_lab_test_template(lab_test_name):
     template_id = frappe.db.exists(
-        "Lab Test Template", {"lab_test_name": lab_test_name}
+        "Lab Test Template", {"lab_test_code": lab_test_name}
     )
     if template_id:
-        return frappe.get_cached_doc("Lab Test Template", template_id)
+        return frappe.get_cached_doc("Lab Test Template", lab_test_name)
     return False
 
 
@@ -116,6 +117,9 @@ def before_submit(doc, method):
                 f"Approval number is required for <b>{doc.radiology_examination_template}</b>. Please set the Approval Number."
             )
         )
+
+    doc.hms_tz_submitted_by = get_fullname(frappe.session.user)
+    doc.hms_tz_user_id = frappe.session.user
 
     # 2023-07-13
     # stop this validation for now
@@ -132,6 +136,7 @@ def before_submit(doc, method):
 def on_submit(doc, method):
     update_lab_prescription(doc)
     create_delivery_note(doc)
+    send_sms_for_lab_results(doc)
 
 
 def create_delivery_note(doc):
@@ -256,3 +261,45 @@ def update_lab_prescription(doc):
                     row.name,
                     {"lab_test": doc.name, "delivered_quantity": 1},
                 )
+
+
+def send_sms_for_lab_results(doc):
+    if doc.ref_doctype == "Patient Encounter":
+        (
+            allow_send_sms_for_multiple_labs,
+            lab_result_sms_template,
+        ) = frappe.get_cached_value(
+            "Company",
+            doc.company,
+            ["allow_send_sms_for_multiple_labs", "lab_result_sms_template"],
+        )
+
+        if allow_send_sms_for_multiple_labs == 0:
+            return
+
+        if not lab_result_sms_template:
+            return
+
+        all_labs_per_encounter = frappe.get_all(
+            "Lab Test",
+            filters={
+                "ref_doctype": "Patient Encounter",
+                "ref_docname": doc.ref_docname,
+                "sms_sent": 0,
+            },
+            fields=["name", "docstatus"],
+        )
+        sms_sent = False
+        if len(all_labs_per_encounter) > 0:
+            draft_labs = [lab for lab in all_labs_per_encounter if lab.docstatus == 0]
+            if len(draft_labs) == 0:
+                phone_number = [doc.mobile]
+                if lab_result_sms_template and phone_number:
+                    msg = frappe.render_template(lab_result_sms_template, {"doc": doc})
+                    send_sms(phone_number, msg, success_msg=False)
+                    sms_sent = True
+                    frappe.msgprint(_(f"SMS sent to Patient: {doc.patient_name}, PhoneNo: {doc.mobile}"), alert=True)
+
+        if sms_sent:
+            for row in all_labs_per_encounter:
+                frappe.db.set_value("Lab Test", row.name, "sms_sent", 1)
